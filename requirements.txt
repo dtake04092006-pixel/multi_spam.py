@@ -1,0 +1,6 @@
+discord.py-self
+flask
+python-dotenv
+requests
+asyncio
+waitress
