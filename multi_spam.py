@@ -1139,7 +1139,6 @@ def index():
     if "max_heart_thresholds" not in bot_states["auto_clan_drop"]:
         bot_states["auto_clan_drop"]["max_heart_thresholds"] = {}
     return render_template_string(HTML_TEMPLATE, 
-        servers=sorted(servers, key=lambda s: s.get('name', '')), 
         main_bots_info=main_bots_info, 
         auto_clan_drop=bot_states["auto_clan_drop"],
         bot_states=bot_states
