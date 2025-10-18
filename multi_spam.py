@@ -17,11 +17,8 @@ acc_names = [f"Bot-{i:02d}" for i in range(1, 21)]
 servers = []
 bot_states = {
     "reboot_settings": {}, "active": {}, "watermelon_grab": {}, "health_stats": {},
-    "auto_clan_drop": {"enabled": False, "channel_id": "", "ktb_channel_id": "", "last_cycle_start_time": 0, "cycle_interval": 1800, "bot_delay": 140, "heart_thresholds": {}, "max_heart_thresholds": {}},
-    "webhook_url": "", 
-    "webhook_threshold": 100
 }
-stop_events = {"reboot": threading.Event(), "clan_drop": threading.Event()}
+stop_events = {"reboot": threading.Event()}
 server_start_time = time.time()
 
 # --- QUẢN LÍ BOT THREAD-SAFE ---
@@ -171,88 +168,6 @@ def get_bot_name(bot_id_str):
     except (IndexError, ValueError):
         return bot_id_str.upper()
 
-# <<< TÍCH HỢP WEBHOOK BƯỚC 1 >>>
-# --- HÀM GỬI THÔNG BÁO WEBHOOK ---
-def send_webhook_notification(webhook_url, embed_data):
-    """Gửi một tin nhắn embed đẹp mắt đến Discord qua Webhook."""
-    if not webhook_url or not webhook_url.startswith("https://discord.com/api/webhooks/"):
-        return
-
-    payload = {
-        "username": "Karuta Alerter",
-        "avatar_url": "https://pin.it/28AJ7Qu9p",
-        "embeds": [embed_data]
-    }
-    try:
-        threading.Thread(target=requests.post, args=(webhook_url,), kwargs={'json': payload}).start()
-    except Exception as e:
-        print(f"[Webhook] ❌ Lỗi khi gửi thông báo: {e}")
-
-# --- LOGIC GRAB CARD ---
-async def _find_and_select_card(bot, channel_id, last_drop_msg_id, heart_threshold, bot_num, ktb_channel_id, max_heart_threshold=99999):
-    try:
-        channel = bot.get_channel(int(channel_id))
-        if not channel: return False
-    except ValueError:
-        return False
-        
-    for _ in range(7):
-        await asyncio.sleep(0.5)
-        try:
-            async for msg_item in channel.history(limit=5):
-                if msg_item.author.id == int(karibbit_id) and msg_item.id > int(last_drop_msg_id):
-                    if not msg_item.embeds: continue
-                    desc = msg_item.embeds[0].description
-                    if not desc or '♡' not in desc: continue
-
-                    lines = desc.split('\n')[:3]
-                    heart_numbers = [int(re.search(r'♡(\d+)', line).group(1)) if re.search(r'♡(\d+)', line) else 0 for line in lines]
-                    if not any(heart_numbers): break
-                    
-                    valid_cards = [(idx, hearts) for idx, hearts in enumerate(heart_numbers) if heart_threshold <= hearts <= max_heart_threshold]
-                    if not valid_cards:
-                        continue
-                    
-                    max_index, max_num = max(valid_cards, key=lambda x: x[1])
-                    
-                    delays = {1: [0.35, 1.35, 2.05], 2: [0.7, 1.8, 2.4], 3: [0.7, 1.8, 2.4], 4: [0.8, 1.9, 2.5]}
-                    bot_delays = delays.get(bot_num, [0.9, 2.0, 2.6])
-                    emoji = ["1️⃣", "2️⃣", "3️⃣"][max_index]
-                    delay = bot_delays[max_index]
-                    
-                    print(f"[CARD GRAB | Bot {bot_num}] Chọn dòng {max_index+1} với {max_num}♡ (range: {heart_threshold}-{max_heart_threshold}) -> {emoji} sau {delay}s", flush=True)
-
-                    async def grab_action():
-                        try:
-                            drop_message = await channel.fetch_message(int(last_drop_msg_id))
-                            await drop_message.add_reaction(emoji)
-                            await asyncio.sleep(1.2)
-                            if ktb_channel_id:
-                                ktb_channel = bot.get_channel(int(ktb_channel_id))
-                                if ktb_channel: await ktb_channel.send("kt fs")
-                            print(f"[CARD GRAB | Bot {bot_num}] ✅ Đã grab và gửi kt b", flush=True)
-                        except discord.errors.NotFound:
-                             print(f"[CARD GRAB | Bot {bot_num}] ⚠️ Drop message not found.", flush=True)
-                        except Exception as e:
-                            print(f"[CARD GRAB | Bot {bot_num}] ❌ Lỗi grab: {e}", flush=True)
-
-                    asyncio.get_running_loop().call_later(delay, lambda: asyncio.create_task(grab_action()))
-                    return True
-            return False
-        except Exception as e:
-            print(f"[CARD GRAB | Bot {bot_num}] ❌ Lỗi đọc messages: {e}", flush=True)
-    return False
-
-# --- LOGIC BOT ---
-async def handle_clan_drop(bot, msg, bot_num):
-    clan_settings = bot_states["auto_clan_drop"]
-    if not (clan_settings.get("enabled") and msg.channel.id == int(clan_settings.get("channel_id", 0))):
-        return
-    bot_id_str = f'main_{bot_num}'
-    threshold = clan_settings.get("heart_thresholds", {}).get(bot_id_str, 50)
-    max_threshold = clan_settings.get("max_heart_thresholds", {}).get(bot_id_str, 99999)
-    asyncio.create_task(_find_and_select_card(bot, clan_settings["channel_id"], msg.id, threshold, bot_num, clan_settings["ktb_channel_id"], max_threshold))
-
 # <<< TÍCH HỢP WEBHOOK BƯỚC 3 >>>
 # ==============================================================================
 # <<< HÀM HANDLE_GRAB ĐÃ ĐƯỢC THAY THẾ HOÀN TOÀN BẰNG LOGIC NÂNG CẤP >>>
@@ -342,35 +257,24 @@ async def handle_grab(bot, msg, bot_num):
             target_message = await msg.channel.fetch_message(msg.id)
             for reaction in target_message.reactions:
                 emoji_name = reaction.emoji if isinstance(reaction.emoji, str) else reaction.emoji.name
+                
+                # Kiểm tra kẹo 🍬
                 if '🍬' in emoji_name:
                     await target_message.add_reaction("🍬")
-                    print(f"[GRAB CTRL | Bot {bot_num}] ✅ NHẶT DƯA THÀNH CÔNG!", flush=True)
-                    break 
+                    print(f"[GRAB CTRL | Bot {bot_num}] ✅ NHẶT KẸO (🍬) THÀNH CÔNG!", flush=True)
+                    break # Dừng lại sau khi nhặt
+                
+                # HOẶC Kiểm tra socola 🍫
+                elif '🍫' in emoji_name:
+                    await target_message.add_reaction("🍫")
+                    print(f"[GRAB CTRL | Bot {bot_num}] ✅ NHẶT SOCOLA (🍫) THÀNH CÔNG!", flush=True)
+                    break # Dừng lại sau khi nhặt
+                    
         except Exception as e:
-            print(f"[GRAB CTRL | Bot {bot_num}] ❌ Lỗi khi nhặt dưa: {e}", flush=True)
+            print(f"[GRAB CTRL | Bot {bot_num}] ❌ Lỗi khi nhặt vật phẩm: {e}", flush=True)
 
     if card_to_grab:
         emoji_to_add, reaction_delay = card_to_grab
-        
-        # ### GỬI WEBHOOK NGAY KHI TÌM THẤY THẺ ###
-        webhook_url = bot_states.get('webhook_url')
-        webhook_threshold = bot_states.get('webhook_threshold', 100)
-        if webhook_url and card_info_for_webhook.get("hearts", 0) >= webhook_threshold:
-            print(f"[Webhook] Thẻ {card_info_for_webhook['hearts']}♡ đạt ngưỡng {webhook_threshold}♡. Đang gửi thông báo...", flush=True)
-            embed = {
-                "title": f"💎 Grab Alert: {card_info_for_webhook['card_name']}",
-                "description": f"**Series:** {card_info_for_webhook['series_name']}",
-                "color": 15258703,
-                "fields": [
-                    {"name": "Hearts", "value": f"**{card_info_for_webhook['hearts']}** ♡", "inline": True},
-                    {"name": "Grabber", "value": card_info_for_webhook['bot_name'], "inline": True},
-                    {"name": "Location", "value": f"{card_info_for_webhook['server_name']}\n#{card_info_for_webhook['channel_name']}", "inline": False}
-                ],
-                "thumbnail": {"url": card_info_for_webhook['thumbnail_url']} if card_info_for_webhook.get('thumbnail_url') else None,
-                "footer": {"text": f"Thông báo lúc: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}
-            }
-            send_webhook_notification(webhook_url, embed)
-        # ###########################################
         
         async def grab_card_action():
             try:
@@ -534,42 +438,6 @@ def auto_reboot_loop():
             traceback.print_exc()
             stop_events["reboot"].wait(120)
 
-def run_clan_drop_cycle():
-    print("[Clan Drop] 🚀 Bắt đầu chu kỳ drop clan.", flush=True)
-    settings = bot_states["auto_clan_drop"]
-    channel_id = settings.get("channel_id")
-    if not channel_id: return
-    
-    active_main_bots_info = [
-        (bot_id, int(bot_id.split('_')[1])) 
-        for bot_id, data in bot_manager.get_main_bots_info() 
-        if data.get('instance') and bot_states["active"].get(bot_id, False)
-    ]
-    if not active_main_bots_info:
-        print("[Clan Drop] ⚠️ Không có bot chính nào hoạt động.", flush=True)
-        return
-
-    for bot_id, bot_num in active_main_bots_info:
-        if stop_events["clan_drop"].is_set(): break
-        try:
-            print(f"[Clan Drop] 📤 Bot {get_bot_name(f'main_{bot_num}')} đang gửi 'kd'...", flush=True)
-            send_message_from_sync(bot_id, channel_id, "kd")
-            time.sleep(random.uniform(settings["bot_delay"] * 0.8, settings["bot_delay"] * 1.2))
-        except Exception as e:
-            print(f"[Clan Drop] ❌ Lỗi khi gửi 'kd' từ bot {bot_num}: {e}", flush=True)
-    
-    settings["last_cycle_start_time"] = time.time()
-    save_settings()
-
-def auto_clan_drop_loop():
-    while not stop_events["clan_drop"].is_set():
-        settings = bot_states["auto_clan_drop"]
-        if (settings.get("enabled") and settings.get("channel_id") and 
-            (time.time() - settings.get("last_cycle_start_time", 0)) >= settings.get("cycle_interval", 1800)):
-            run_clan_drop_cycle()
-        stop_events["clan_drop"].wait(60)
-    print("[Clan Drop] 🛑 Luồng tự động drop clan đã dừng.", flush=True)
-
 # --- HỆ THỐNG SPAM ---
 def enhanced_spam_loop():
     print("[Enhanced Spam] 🚀 Khởi động hệ thống spam tối ưu (đa luồng)...", flush=True)
@@ -723,16 +591,14 @@ def initialize_and_run_bot(token, bot_id_str, is_main, ready_event=None):
         except Exception as e:
             print(f"[Bot] ❌ Error in on_ready for {bot_id_str}: {e}", flush=True)
     
-    if is_main:
-        @bot.event
-        async def on_message(msg, bot_num=bot_identifier):
-            try:
-                if msg.author.id == int(karuta_id) and "dropping" in msg.content.lower():
-                    is_clan_drop = bool(msg.mentions) 
-                    handler = handle_clan_drop if is_clan_drop else handle_grab
-                    await handler(bot, msg, bot_num)
-            except Exception as e:
-                print(f"[Bot] ❌ Error in on_message for {bot_id_str} (Bot {bot_num}): {e}\n{traceback.format_exc()}", flush=True)
+    @bot.event
+    async def on_message(msg, bot_num=bot_identifier):
+        try:
+            if msg.author.id == int(karuta_id) and "dropping" in msg.content.lower():
+                # Đã xóa logic clan drop, chỉ gọi handle_grab
+                await handle_grab(bot, msg, bot_num)
+        except Exception as e:
+            print(f"[Bot] ❌ Error in on_message for {bot_id_str} (Bot {bot_num}): {e}\n{traceback.format_exc()}", flush=True)
     
     try:
         bot_manager.add_bot(bot_id_str, {'instance': bot, 'loop': loop, 'thread': threading.current_thread()})
@@ -837,111 +703,69 @@ HTML_TEMPLATE = """
                      <div id="bot-control-grid" class="bot-status-grid" style="grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));"></div>
                 </div>
             </div>
-            <div class="panel clan-drop-panel">
-                <h2><i class="fas fa-users"></i> Clan Auto Drop</h2>
-                <div class="status-grid" style="grid-template-columns: 1fr;">
-                     <div class="status-row">
-                        <span><i class="fas fa-hourglass-half"></i> Next Drop Cycle</span>
-                        <div class="flex-row">
-                            <span id="clan-drop-timer" class="timer-display">--:--:--</span>
-                            <button type="button" id="clan-drop-toggle-btn" class="btn btn-small">{{ 'DISABLE' if auto_clan_drop.enabled else 'ENABLE' }}</button>
+                <div class="panel global-settings-panel">
+                    <h2><i class="fas fa-globe-americas"></i> Global Soul Harvest Control</h2>
+                    <div class="server-sub-panel">
+                        <h3><i class="fas fa-cogs"></i> Master Heart Thresholds</h3>
+                        <p style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 20px;">
+                            Chỉnh sửa giá trị tại đây và nhấn "Save & Apply" để cập nhật giới hạn nhặt thẻ cho bot tương ứng trên <strong>TẤT CẢ</strong> các server.
+                        </p>
+                        {% for bot in main_bots_info %}
+                        <div class="grab-section">
+                            <h3>{{ bot.name }}</h3>
+                            <div class="input-group">
+                                <input type="number" class="global-harvest-threshold heart-input" data-node="main_{{ bot.id }}" value="{{ (servers[0]['heart_threshold_' + bot.id|string]) if servers else 50 }}" min="0" max="99999" placeholder="Min ♡">
+                                <input type="number" class="global-harvest-max-threshold heart-input" data-node="main_{{ bot.id }}" value="{{ (servers[0]['max_heart_threshold_' + bot.id|string]) if servers else 99999 }}" min="0" max="99999" placeholder="Max ♡">
+                            </div>
                         </div>
+                        {% endfor %}
+                    </div>
+                    <button type="button" id="save-global-harvest-settings" class="btn" style="margin-top: 20px; background-color: var(--necro-green);">
+                        <i class="fas fa-save"></i> Save & Apply to All Servers
+                    </button>
+                </div>
+                <div class="panel global-settings-panel">
+                    <h2><i class="fas fa-globe"></i> Global Event Settings</h2>
+                    <div class="server-sub-panel">
+                        <h3><i class="fas fa-seedling"></i> Watermelon Grab (All Servers) - 🍉 FIXED!</h3>
+                        <div id="global-watermelon-grid" class="bot-status-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));"></div>
                     </div>
                 </div>
-                <div class="server-sub-panel">
-                    <h3><i class="fas fa-cogs"></i> Configuration</h3>
-                    <div class="input-group"><label>Drop Channel ID</label><input type="text" id="clan-drop-channel-id" value="{{ auto_clan_drop.channel_id or '' }}"></div>
-                    <div class="input-group"><label>KTB Channel ID</label><input type="text" id="clan-drop-ktb-channel-id" value="{{ auto_clan_drop.ktb_channel_id or '' }}"></div>
-                </div>
-                <div class="server-sub-panel">
-                    <h3><i class="fas fa-crosshairs"></i> Soul Harvest (Clan Drop)</h3>
-                    {% for bot in main_bots_info %}
-                    <div class="grab-section">
-                        <h3>{{ bot.name }}</h3>
-                        <div class="input-group">
-                            <input type="number" class="clan-drop-threshold heart-input" data-node="main_{{ bot.id }}" value="{{ auto_clan_drop.heart_thresholds[('main_' + bot.id|string)]|default(50) }}" min="0" max="99999" placeholder="Min ♡">
-                            <input type="number" class="clan-drop-max-threshold heart-input" data-node="main_{{ bot.id }}" value="{{ auto_clan_drop.max_heart_thresholds[('main_' + bot.id|string)]|default(99999) }}" min="0" max="99999" placeholder="Max ♡">
+                {% for server in servers %}
+                <div class="panel server-panel" data-server-id="{{ server.id }}">
+                    <button class="btn-delete-server" title="Delete Server"><i class="fas fa-times"></i></button>
+                    <h2><i class="fas fa-server"></i> {{ server.name }}</h2>
+                    <div class="server-sub-panel">
+                        <h3><i class="fas fa-cogs"></i> Channel Config</h3>
+                        <div class="input-group"><label>Main Channel ID</label><input type="text" class="channel-input" data-field="main_channel_id" value="{{ server.main_channel_id or '' }}"></div>
+                        <div class="input-group"><label>KTB Channel ID</label><input type="text" class="channel-input" data-field="ktb_channel_id" value="{{ server.ktb_channel_id or '' }}"></div>
+                        <div class="input-group"><label>Spam Channel ID</label><input type="text" class="channel-input" data-field="spam_channel_id" value="{{ server.spam_channel_id or '' }}"></div>
+                    </div>
+                    <div class="server-sub-panel">
+                        <h3><i class="fas fa-crosshairs"></i> Soul Harvest (Card Grab) - ❤️ FIXED!</h3>
+                        {% for bot in main_bots_info %}
+                        <div class="grab-section">
+                            <h3>{{ bot.name }}</h3>
+                            <div class="input-group">
+                                 <input type="number" class="harvest-threshold heart-input" data-node="{{ bot.id }}" value="{{ server['heart_threshold_' + bot.id|string] or 50 }}" min="0" placeholder="Min ♡">
+                                <input type="number" class="harvest-max-threshold heart-input" data-node="{{ bot.id }}" value="{{ server['max_heart_threshold_' + bot.id|string]|default(99999) }}" min="0" placeholder="Max ♡">
+                                <button type="button" class="btn harvest-toggle" data-node="{{ bot.id }}">
+                                    {{ 'DISABLE' if server['auto_grab_enabled_' + bot.id|string] else 'ENABLE' }}
+                                </button>
+                            </div>
                         </div>
+                        {% endfor %}
                     </div>
-                    {% endfor %}
+                    <div class="server-sub-panel">
+                        <h3><i class="fas fa-paper-plane"></i> Auto Broadcast - ⚡ FIXED!</h3>
+                        <div class="input-group"><label>Message</label><textarea class="spam-message" rows="2">{{ server.spam_message or '' }}</textarea></div>
+                        <button type="button" class="btn broadcast-toggle">{{ 'DISABLE' if server.spam_enabled else 'ENABLE' }}</button>
+                    </div>
                 </div>
-                <button type="button" id="clan-drop-save-btn" class="btn" style="margin-top: 20px;">Save Clan Drop Settings</button>
+                {% endfor %}
+                <div class="panel add-server-btn" id="add-server-btn"> <i class="fas fa-plus"></i></div>
             </div>
-            <div class="panel global-settings-panel">
-                <h2><i class="fas fa-globe-americas"></i> Global Soul Harvest Control</h2>
-                <div class="server-sub-panel">
-                    <h3><i class="fas fa-cogs"></i> Master Heart Thresholds</h3>
-                    <p style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 20px;">
-                        Chỉnh sửa giá trị tại đây và nhấn "Save & Apply" để cập nhật giới hạn nhặt thẻ cho bot tương ứng trên <strong>TẤT CẢ</strong> các server.
-                    </p>
-                    {% for bot in main_bots_info %}
-                    <div class="grab-section">
-                        <h3>{{ bot.name }}</h3>
-                        <div class="input-group">
-                            <input type="number" class="global-harvest-threshold heart-input" data-node="main_{{ bot.id }}" value="{{ (servers[0]['heart_threshold_' + bot.id|string]) if servers else 50 }}" min="0" max="99999" placeholder="Min ♡">
-                            <input type="number" class="global-harvest-max-threshold heart-input" data-node="main_{{ bot.id }}" value="{{ (servers[0]['max_heart_threshold_' + bot.id|string]) if servers else 99999 }}" min="0" max="99999" placeholder="Max ♡">
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                <button type="button" id="save-global-harvest-settings" class="btn" style="margin-top: 20px; background-color: var(--necro-green);">
-                    <i class="fas fa-save"></i> Save & Apply to All Servers
-                </button>
-            </div>
-            <div class="panel global-settings-panel">
-                <h2><i class="fas fa-globe"></i> Global Event Settings</h2>
-                <div class="server-sub-panel">
-                    <h3><i class="fas fa-bell"></i> Webhook Notifications</h3>
-                    <div class="input-group">
-                        <label>Webhook URL</label>
-                        <input type="text" id="webhook-url" value="{{ bot_states.get('webhook_url', '') }}">
-                    </div>
-                    <div class="input-group">
-                        <label>Min Hearts Alert</label>
-                        <input type="number" id="webhook-threshold" value="{{ bot_states.get('webhook_threshold', 100) }}" style="width: 120px; flex-grow: 0;">
-                    </div>
-                    <button type="button" id="save-webhook-settings" class="btn">Save Notification Settings</button>
-                </div>
-                <div class="server-sub-panel">
-                    <h3><i class="fas fa-seedling"></i> Watermelon Grab (All Servers) - 🍉 FIXED!</h3>
-                    <div id="global-watermelon-grid" class="bot-status-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));"></div>
-                </div>
-            </div>
-            {% for server in servers %}
-            <div class="panel server-panel" data-server-id="{{ server.id }}">
-                <button class="btn-delete-server" title="Delete Server"><i class="fas fa-times"></i></button>
-                <h2><i class="fas fa-server"></i> {{ server.name }}</h2>
-                <div class="server-sub-panel">
-                    <h3><i class="fas fa-cogs"></i> Channel Config</h3>
-                    <div class="input-group"><label>Main Channel ID</label><input type="text" class="channel-input" data-field="main_channel_id" value="{{ server.main_channel_id or '' }}"></div>
-                    <div class="input-group"><label>KTB Channel ID</label><input type="text" class="channel-input" data-field="ktb_channel_id" value="{{ server.ktb_channel_id or '' }}"></div>
-                    <div class="input-group"><label>Spam Channel ID</label><input type="text" class="channel-input" data-field="spam_channel_id" value="{{ server.spam_channel_id or '' }}"></div>
-                </div>
-                <div class="server-sub-panel">
-                    <h3><i class="fas fa-crosshairs"></i> Soul Harvest (Card Grab) - ❤️ FIXED!</h3>
-                    {% for bot in main_bots_info %}
-                    <div class="grab-section">
-                        <h3>{{ bot.name }}</h3>
-                        <div class="input-group">
-                             <input type="number" class="harvest-threshold heart-input" data-node="{{ bot.id }}" value="{{ server['heart_threshold_' + bot.id|string] or 50 }}" min="0" placeholder="Min ♡">
-                            <input type="number" class="harvest-max-threshold heart-input" data-node="{{ bot.id }}" value="{{ server['max_heart_threshold_' + bot.id|string]|default(99999) }}" min="0" placeholder="Max ♡">
-                            <button type="button" class="btn harvest-toggle" data-node="{{ bot.id }}">
-                                {{ 'DISABLE' if server['auto_grab_enabled_' + bot.id|string] else 'ENABLE' }}
-                            </button>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                <div class="server-sub-panel">
-                    <h3><i class="fas fa-paper-plane"></i> Auto Broadcast - ⚡ FIXED!</h3>
-                    <div class="input-group"><label>Message</label><textarea class="spam-message" rows="2">{{ server.spam_message or '' }}</textarea></div>
-                    <button type="button" class="btn broadcast-toggle">{{ 'DISABLE' if server.spam_enabled else 'ENABLE' }}</button>
-                </div>
-            </div>
-            {% endfor %}
-            <div class="panel add-server-btn" id="add-server-btn"> <i class="fas fa-plus"></i></div>
         </div>
-    </div>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const msgStatusContainer = document.getElementById('msg-status-container');
@@ -993,10 +817,6 @@ HTML_TEMPLATE = """
                 const data = await response.json();
                 const serverUptimeSeconds = (Date.now() / 1000) - data.server_start_time;
                 updateElement(document.getElementById('uptime-timer'), { textContent: formatTime(serverUptimeSeconds) });
-                if (data.auto_clan_drop_status) {
-                    updateElement(document.getElementById('clan-drop-timer'), { textContent: formatTime(data.auto_clan_drop_status.countdown) });
-                    updateElement(document.getElementById('clan-drop-toggle-btn'), { textContent: data.auto_clan_drop_status.enabled ? 'DISABLE' : 'ENABLE' });
-                }
                 const botControlGrid = document.getElementById('bot-control-grid');
                 const allBots = [...data.bot_statuses.main_bots, ...data.bot_statuses.sub_accounts];
                 const updatedBotIds = new Set();
@@ -1077,22 +897,10 @@ HTML_TEMPLATE = """
             const actions = {
                 'bot-reboot-toggle': () => postData('/api/bot_reboot_toggle', { bot_id: button.dataset.botId, delay: document.querySelector(`.bot-reboot-delay[data-bot-id="${button.dataset.botId}"]`).value }),
                 'btn-toggle-state': () => postData('/api/toggle_bot_state', { target: button.dataset.target }),
-                'clan-drop-toggle-btn': () => postData('/api/clan_drop_toggle'),
-                'clan-drop-save-btn': () => {
-                    const thresholds = {}, maxThresholds = {};
-                    document.querySelectorAll('.clan-drop-threshold').forEach(i => { thresholds[i.dataset.node] = parseInt(i.value, 10) || 50; });
-                    document.querySelectorAll('.clan-drop-max-threshold').forEach(i => { maxThresholds[i.dataset.node] = parseInt(i.value, 10) || 99999; });
-                    postData('/api/clan_drop_update', { channel_id: document.getElementById('clan-drop-channel-id').value, ktb_channel_id: document.getElementById('clan-drop-ktb-channel-id').value, heart_thresholds: thresholds, max_heart_thresholds: maxThresholds });
-                },
                 'watermelon-toggle': () => postData('/api/watermelon_toggle', { node: button.dataset.node }),
                 'harvest-toggle': () => serverId && postData('/api/harvest_toggle', { server_id: serverId, node: button.dataset.node, threshold: serverPanel.querySelector(`.harvest-threshold[data-node="${button.dataset.node}"]`).value, max_threshold: serverPanel.querySelector(`.harvest-max-threshold[data-node="${button.dataset.node}"]`).value }),
                 'broadcast-toggle': () => serverId && postData('/api/broadcast_toggle', { server_id: serverId, message: serverPanel.querySelector('.spam-message').value }),
                 'btn-delete-server': () => serverId && confirm('Are you sure you want to delete this server?') && postData('/api/delete_server', { server_id: serverId }),
-                'save-webhook-settings': () => {
-                    const url = document.getElementById('webhook-url').value;
-                    const threshold = parseInt(document.getElementById('webhook-threshold').value, 10);
-                    postData('/api/update_webhook_settings', { webhook_url: url, webhook_threshold: threshold });
-                },
                 'save-global-harvest-settings': () => {
                     const payload = {};
                     document.querySelectorAll('.global-harvest-threshold').forEach(input => {
@@ -1136,40 +944,11 @@ def index():
     main_bots_info_list = [(bot_id, data) for bot_id, data in bot_manager.get_main_bots_info()]
     main_bots_info = [{"id": int(bot_id.split('_')[1]), "name": get_bot_name(bot_id)} for bot_id, _ in main_bots_info_list]
     main_bots_info.sort(key=lambda x: x['id'])
-    if "max_heart_thresholds" not in bot_states["auto_clan_drop"]:
-        bot_states["auto_clan_drop"]["max_heart_thresholds"] = {}
-    return render_template_string(HTML_TEMPLATE,
-        servers=servers,
+    return render_template_string(HTML_TEMPLATE, 
+        servers=sorted(servers, key=lambda s: s.get('name', '')), 
         main_bots_info=main_bots_info, 
-        auto_clan_drop=bot_states["auto_clan_drop"],
         bot_states=bot_states
     )
-
-@app.route("/api/clan_drop_toggle", methods=['POST'])
-def api_clan_drop_toggle():
-    settings = bot_states["auto_clan_drop"]
-    settings['enabled'] = not settings.get('enabled', False)
-    if settings['enabled']:
-        if not settings.get('channel_id') or not settings.get('ktb_channel_id'):
-            settings['enabled'] = False
-            return jsonify({'status': 'error', 'message': 'Clan Drop & KTB Channel ID phải được cài đặt.'})
-        threading.Thread(target=run_clan_drop_cycle).start()
-        msg = "✅ Clan Auto Drop ENABLED & First cycle triggered."
-    else:
-        msg = "🛑 Clan Auto Drop DISABLED."
-    return jsonify({'status': 'success', 'message': msg})
-
-@app.route("/api/clan_drop_update", methods=['POST'])
-def api_clan_drop_update():
-    data = request.get_json()
-    thresholds = bot_states["auto_clan_drop"].setdefault('heart_thresholds', {})
-    max_thresholds = bot_states["auto_clan_drop"].setdefault('max_heart_thresholds', {})
-    for key, value in data.get('heart_thresholds', {}).items():
-        if isinstance(value, int): thresholds[key] = value
-    for key, value in data.get('max_heart_thresholds', {}).items():
-        if isinstance(value, int): max_thresholds[key] = value
-    bot_states["auto_clan_drop"].update({'channel_id': data.get('channel_id', '').strip(), 'ktb_channel_id': data.get('ktb_channel_id', '').strip()})
-    return jsonify({'status': 'success', 'message': '💾 Clan Drop settings updated.'})
 
 @app.route("/api/add_server", methods=['POST'])
 def api_add_server():
@@ -1296,15 +1075,6 @@ def api_update_global_harvest_settings():
     
     return jsonify({'status': 'success', 'message': f'✅ Đã cập nhật thành công cài đặt cho {len(thresholds_data)} bot trên {updated_count} server.', 'reload': True})
 
-# <<< TÍCH HỢP WEBHOOK BƯỚC 2 (tiếp) >>>
-@app.route("/api/update_webhook_settings", methods=['POST'])
-def api_update_webhook_settings():
-    data = request.get_json()
-    bot_states['webhook_url'] = data.get('webhook_url', '').strip()
-    bot_states['webhook_threshold'] = data.get('webhook_threshold', 100)
-    save_settings()
-    return jsonify({'status': 'success', 'message': '💾 Webhook settings saved.'})
-
 @app.route("/api/save_settings", methods=['POST'])
 def api_save_settings(): save_settings(); return jsonify({'status': 'success', 'message': '💾 Settings saved.'})
 
@@ -1326,13 +1096,11 @@ def status_endpoint():
         "main_bots": get_bot_status_list(bot_manager.get_main_bots_info(), "main"),
         "sub_accounts": get_bot_status_list(bot_manager.get_sub_bots_info(), "sub")
     }
-    clan_settings = bot_states["auto_clan_drop"]
-    clan_drop_status = {"enabled": clan_settings.get("enabled", False), "countdown": (clan_settings.get("last_cycle_start_time", 0) + clan_settings.get("cycle_interval", 1800) - now) if clan_settings.get("enabled") else 0}
     reboot_settings_copy = bot_states["reboot_settings"].copy()
     for bot_id, settings in reboot_settings_copy.items():
         settings['countdown'] = max(0, settings.get('next_reboot_time', 0) - now) if settings.get('enabled') else 0
     
-    return jsonify({'bot_reboot_settings': reboot_settings_copy, 'bot_statuses': bot_statuses, 'server_start_time': server_start_time, 'servers': servers, 'watermelon_grab_states': bot_states["watermelon_grab"], 'auto_clan_drop_status': clan_drop_status})
+    return jsonify({'bot_reboot_settings': reboot_settings_copy, 'bot_statuses': bot_statuses, 'server_start_time': server_start_time, 'servers': servers, 'watermelon_grab_states': bot_states["watermelon_grab"]})
 
 # --- MAIN EXECUTION ---
 if __name__ == "__main__":
@@ -1350,8 +1118,6 @@ if __name__ == "__main__":
         bot_threads.append(thread)
         bot_states["active"].setdefault(bot_id, True)
         bot_states["watermelon_grab"].setdefault(bot_id, False)
-        bot_states["auto_clan_drop"]["heart_thresholds"].setdefault(bot_id, 50)
-        bot_states["auto_clan_drop"].setdefault("max_heart_thresholds", {}).setdefault(bot_id, 99999)
         bot_states["reboot_settings"].setdefault(bot_id, {'enabled': False, 'delay': 3600, 'next_reboot_time': 0, 'failure_count': 0})
         bot_states["health_stats"].setdefault(bot_id, {'consecutive_failures': 0})
 
@@ -1376,7 +1142,6 @@ if __name__ == "__main__":
     start_optimized_spam_system(mode="optimized") 
     
     threading.Thread(target=auto_reboot_loop, daemon=True).start()
-    threading.Thread(target=auto_clan_drop_loop, daemon=True).start()
     
     port = int(os.environ.get("PORT", 10000))
     print(f"🌐 Web Server running at http://0.0.0.0:{port}", flush=True)
