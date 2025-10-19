@@ -593,6 +593,10 @@ def initialize_and_run_bot(token, bot_id_str, is_main, ready_event=None):
     
     @bot.event
     async def on_message(msg, bot_num=bot_identifier):
+        # NẾU LÀ BOT PHỤ (SPAM), KHÔNG BAO GIỜ XỬ LÝ DROP
+        if not is_main:
+            return
+
         try:
             if msg.author.id == int(karuta_id) and "dropping" in msg.content.lower():
                 # Đã xóa logic clan drop, chỉ gọi handle_grab
