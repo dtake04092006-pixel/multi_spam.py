@@ -2,9 +2,12 @@
 # exit on error
 set -o errexit
 
-# Thêm sudo vào 2 dòng dưới
-sudo apt-get update
-sudo apt-get install -y tesseract-ocr
+# Tạo thư mục bị thiếu mà log lỗi đầu tiên đã báo
+mkdir -p /var/lib/apt/lists/partial
 
-# Dòng này giữ nguyên
+# Chạy lệnh (không cần sudo vì đã là root)
+apt-get update
+apt-get install -y tesseract-ocr
+
+# Chạy pip install
 pip install -r requirements.txt
