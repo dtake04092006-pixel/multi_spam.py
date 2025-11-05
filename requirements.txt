@@ -4,5 +4,4 @@ python-dotenv
 requests
 asyncio
 waitress
-pytesseract
-pillow
+
