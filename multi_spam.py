@@ -598,7 +598,7 @@ def initialize_and_run_bot(token, bot_id_str, is_main, ready_event=None):
             return
 
         try:
-            if msg.author.id == int(karuta_id) and "I'm dropping" in msg.content.lower():
+            if msg.author.id == int(karuta_id) and "dropping" in msg.content.lower():
                 # Đã xóa logic clan drop, chỉ gọi handle_grab
                 await handle_grab(bot, msg, bot_num)
         except Exception as e:
