@@ -258,10 +258,10 @@ async def handle_grab(bot, msg, bot_num):
             for reaction in target_message.reactions:
                 emoji_name = reaction.emoji if isinstance(reaction.emoji, str) else reaction.emoji.name
                 
-                # Kiểm tra kẹo 🍬
-                if '🍬' in emoji_name:
-                    await target_message.add_reaction("🍬")
-                    print(f"[GRAB CTRL | Bot {bot_num}] ✅ NHẶT KẸO (🍬) THÀNH CÔNG!", flush=True)
+                # Kiểm tra kẹo 🎀
+                if '🎀' in emoji_name:
+                    await target_message.add_reaction("🎀")
+                    print(f"[GRAB CTRL | Bot {bot_num}] ✅ NHẶT KẸO (🎀) THÀNH CÔNG!", flush=True)
                     break # Dừng lại sau khi nhặt
                 
                 # HOẶC Kiểm tra socola 🍫
