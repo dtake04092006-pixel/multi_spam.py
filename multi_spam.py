@@ -1,4 +1,4 @@
-# PHIÊN BẢN CHUYỂN ĐỔI SANG DISCORD.PY-SELF - TÍCH HỢP WEBHOOK VÀ SỬA LỖI HOÀN CHỈNH
+# PHIÊN BẢN CHUYỂN ĐỔI SANG DISCORD.PY-SELF - TÍCH HỢP GLOBAL GRAB TOGGLE
 import discord, asyncio, threading, time, os, re, requests, json, random, traceback, uuid
 from flask import Flask, request, render_template_string, jsonify
 from dotenv import load_dotenv
@@ -168,10 +168,7 @@ def get_bot_name(bot_id_str):
     except (IndexError, ValueError):
         return bot_id_str.upper()
 
-# <<< TÍCH HỢP WEBHOOK BƯỚC 3 >>>
-# ==============================================================================
-# <<< HÀM HANDLE_GRAB ĐÃ ĐƯỢC THAY THẾ HOÀN TOÀN BẰNG LOGIC NÂNG CẤP >>>
-# ==============================================================================
+# --- LOGIC GRAB ---
 async def handle_grab(bot, msg, bot_num):
     channel_id = msg.channel.id
     target_server = next((s for s in servers if s.get('main_channel_id') == str(channel_id)), None)
@@ -186,8 +183,7 @@ async def handle_grab(bot, msg, bot_num):
         return
 
     card_to_grab = None
-    card_info_for_webhook = {}
-
+    
     if auto_grab_enabled:
         start_time = time.monotonic()
         try:
@@ -218,23 +214,6 @@ async def handle_grab(bot, msg, bot_num):
                                 
                                 card_to_grab = (emoji, delay)
                                 
-                                # Lấy thông tin card để chuẩn bị gửi webhook
-                                card_line = lines[max_index]
-                                card_name_match = re.search(r'\*\*`(.+?)`\*\*', card_line)
-                                series_name_match = re.search(r'\*\*(.+?)\*\*', card_line)
-                                card_name = card_name_match.group(1) if card_name_match else "Unknown Card"
-                                series_name = series_name_match.group(1) if series_name_match else "Unknown Series"
-
-                                card_info_for_webhook = {
-                                    "bot_name": get_bot_name(bot_id_str),
-                                    "card_name": card_name,
-                                    "series_name": series_name,
-                                    "hearts": max_num,
-                                    "server_name": msg.guild.name,
-                                    "channel_name": msg.channel.name,
-                                    "thumbnail_url": msg.embeds[0].image.url if msg.embeds and msg.embeds[0].image else None
-                                }
-
                                 print(f"[GRAB CTRL | Bot {bot_num}] Đã tìm thấy thẻ {max_num}♡. Sẽ nhặt sau {delay}s.", flush=True)
                                 raise StopAsyncIteration
                     if card_to_grab:
@@ -250,7 +229,6 @@ async def handle_grab(bot, msg, bot_num):
 
     if watermelon_grab_enabled:
         wait_for_watermelon_duration = max(0, 5.0 - time_spent_searching)
-        #print(f"[GRAB CTRL | Bot {bot_num}] Chờ thêm {wait_for_watermelon_duration:.1f}s để canh dưa...", flush=True)
         await asyncio.sleep(wait_for_watermelon_duration)
         
         try:
@@ -262,13 +240,13 @@ async def handle_grab(bot, msg, bot_num):
                 if '🎀' in emoji_name:
                     await target_message.add_reaction("🎀")
                     print(f"[GRAB CTRL | Bot {bot_num}] ✅ NHẶT KẸO (🎀) THÀNH CÔNG!", flush=True)
-                    break # Dừng lại sau khi nhặt
+                    break 
                 
-                # HOẶC Kiểm tra socola 🍫
+                # Kiểm tra socola 🍫
                 elif '🍫' in emoji_name:
                     await target_message.add_reaction("🍫")
                     print(f"[GRAB CTRL | Bot {bot_num}] ✅ NHẶT SOCOLA (🍫) THÀNH CÔNG!", flush=True)
-                    break # Dừng lại sau khi nhặt
+                    break 
                     
         except Exception as e:
             print(f"[GRAB CTRL | Bot {bot_num}] ❌ Lỗi khi nhặt vật phẩm: {e}", flush=True)
@@ -621,7 +599,6 @@ def initialize_and_run_bot(token, bot_id_str, is_main, ready_event=None):
 
 # --- FLASK APP & GIAO DIỆN ---
 app = Flask(__name__)
-# <<< TÍCH HỢP WEBHOOK BƯỚC 2 >>>
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="vi">
@@ -710,9 +687,10 @@ HTML_TEMPLATE = """
                 <div class="panel global-settings-panel">
                     <h2><i class="fas fa-globe-americas"></i> Global Soul Harvest Control</h2>
                     <div class="server-sub-panel">
-                        <h3><i class="fas fa-cogs"></i> Master Heart Thresholds</h3>
+                        <h3><i class="fas fa-cogs"></i> Master Heart Thresholds & Toggles</h3>
                         <p style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 20px;">
-                            Chỉnh sửa giá trị tại đây và nhấn "Save & Apply" để cập nhật giới hạn nhặt thẻ cho bot tương ứng trên <strong>TẤT CẢ</strong> các server.
+                            Chỉnh sửa giá trị tại đây và nhấn "Save & Apply" để cập nhật giới hạn nhặt thẻ. <br>
+                            Nút <strong>GLOBAL ON/OFF</strong> sẽ bật hoặc tắt nhặt thẻ cho bot đó trên <strong>TẤT CẢ</strong> các server cùng lúc.
                         </p>
                         {% for bot in main_bots_info %}
                         <div class="grab-section">
@@ -720,12 +698,15 @@ HTML_TEMPLATE = """
                             <div class="input-group">
                                 <input type="number" class="global-harvest-threshold heart-input" data-node="main_{{ bot.id }}" value="{{ (servers[0]['heart_threshold_' + bot.id|string]) if servers else 50 }}" min="0" max="99999" placeholder="Min ♡">
                                 <input type="number" class="global-harvest-max-threshold heart-input" data-node="main_{{ bot.id }}" value="{{ (servers[0]['max_heart_threshold_' + bot.id|string]) if servers else 99999 }}" min="0" max="99999" placeholder="Max ♡">
+                                <button type="button" class="btn global-grab-toggle" data-node="{{ bot.id }}" style="width: auto; margin-left: 10px; background-color: var(--secondary-bg);">
+                                    <i class="fas fa-power-off"></i> GLOBAL ON/OFF
+                                </button>
                             </div>
                         </div>
                         {% endfor %}
                     </div>
                     <button type="button" id="save-global-harvest-settings" class="btn" style="margin-top: 20px; background-color: var(--necro-green);">
-                        <i class="fas fa-save"></i> Save & Apply to All Servers
+                        <i class="fas fa-save"></i> Save & Apply Thresholds to All Servers
                     </button>
                 </div>
                 <div class="panel global-settings-panel">
@@ -905,6 +886,7 @@ HTML_TEMPLATE = """
                 'harvest-toggle': () => serverId && postData('/api/harvest_toggle', { server_id: serverId, node: button.dataset.node, threshold: serverPanel.querySelector(`.harvest-threshold[data-node="${button.dataset.node}"]`).value, max_threshold: serverPanel.querySelector(`.harvest-max-threshold[data-node="${button.dataset.node}"]`).value }),
                 'broadcast-toggle': () => serverId && postData('/api/broadcast_toggle', { server_id: serverId, message: serverPanel.querySelector('.spam-message').value }),
                 'btn-delete-server': () => serverId && confirm('Are you sure you want to delete this server?') && postData('/api/delete_server', { server_id: serverId }),
+                'global-grab-toggle': () => postData('/api/global_grab_toggle', { node: button.dataset.node }),
                 'save-global-harvest-settings': () => {
                     const payload = {};
                     document.querySelectorAll('.global-harvest-threshold').forEach(input => {
@@ -1078,6 +1060,28 @@ def api_update_global_harvest_settings():
     save_settings() # Lưu lại thay đổi
     
     return jsonify({'status': 'success', 'message': f'✅ Đã cập nhật thành công cài đặt cho {len(thresholds_data)} bot trên {updated_count} server.', 'reload': True})
+
+@app.route("/api/global_grab_toggle", methods=['POST'])
+def api_global_grab_toggle():
+    node = str(request.json.get('node'))
+    key = f'auto_grab_enabled_{node}'
+    
+    # Kiểm tra xem TẤT CẢ các server có đang bật không
+    all_enabled = all(s.get(key, False) for s in servers)
+    
+    # Nếu tất cả đang bật -> Tắt hết. 
+    # Nếu có cái tắt cái bật, hoặc tắt hết -> Bật hết.
+    new_state = False if all_enabled else True
+    
+    updated_count = 0
+    for s in servers:
+        s[key] = new_state
+        updated_count += 1
+    
+    save_settings()
+    
+    state_str = "ENABLED" if new_state else "DISABLED"
+    return jsonify({'status': 'success', 'message': f'✅ Đã {state_str} Auto Grab cho Bot {node} trên {updated_count} server.', 'reload': True})
 
 @app.route("/api/save_settings", methods=['POST'])
 def api_save_settings(): save_settings(); return jsonify({'status': 'success', 'message': '💾 Settings saved.'})
